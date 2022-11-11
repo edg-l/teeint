@@ -6,7 +6,9 @@
 //! use std::io::Cursor;
 //!
 //! let mut buff = Cursor::new([0; 2]);
-//! assert!(teeint::pack(&mut buff, 64).is_ok());
+//!
+//! teeint::pack(&mut buff, 64).unwrap();
+//!
 //! let buff = buff.into_inner();
 //! assert_eq!(buff[0], 0b1000_0000);
 //! assert_eq!(buff[1], 0b0000_0001);
@@ -18,11 +20,16 @@
 //! use teeint::PackTwInt;
 //!
 //! let mut buff = Cursor::new([0; 2]);
-//! assert!(64.pack(&mut buff).is_ok());
+//!
+//! 64.pack(&mut buff).unwrap();
+//!
 //! let buff = buff.into_inner();
 //! assert_eq!(buff[0], 0b1000_0000);
 //! assert_eq!(buff[1], 0b0000_0001);
 //! ```
+//!
+//! Thanks to [heinrich5991 libtw2 docs](https://github.com/heinrich5991/libtw2/blob/master/doc/int.md) for help.
+//!
 
 use std::io::{Result, Write};
 
@@ -137,6 +144,15 @@ mod tests {
     pub fn pack_64() {
         let mut buff = Cursor::new([0; 2]);
         assert!(pack(&mut buff, 64).is_ok());
+        let buff = buff.into_inner();
+        assert_eq!(buff[0], 0b1000_0000);
+        assert_eq!(buff[1], 0b0000_0001);
+    }
+
+    #[test]
+    pub fn pack_64_trait() {
+        let mut buff = Cursor::new([0; 2]);
+        assert!(64.pack(&mut buff).is_ok());
         let buff = buff.into_inner();
         assert_eq!(buff[0], 0b1000_0000);
         assert_eq!(buff[1], 0b0000_0001);
