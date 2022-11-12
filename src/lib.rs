@@ -109,6 +109,20 @@ impl PackTwInt for i32 {
     }
 }
 
+/// Trait implemented by buffers holding a teeworlds variable int.
+///
+/// This trait is more of a convenience to allow writing `let data = buff.unpack()?;`
+pub trait UnpPackTwInt: Read {
+    /// Unpack this reader holding a teeworlds variable int to a i32.
+    fn unpack(&mut self) -> Result<i32>;
+}
+
+impl<T: Read> UnpPackTwInt for T {
+    fn unpack(&mut self) -> Result<i32> {
+        unpack(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
@@ -239,5 +253,12 @@ mod tests {
         let buff = buff.into_inner();
         assert_eq!(buff[0], 0b1000_0000);
         assert_eq!(buff[1], 0b0000_0001);
+    }
+
+    #[test]
+    pub fn unpack_64_trait() {
+        let mut buff = Cursor::new([0b1000_0000, 0b0000_0001]);
+        let result = buff.unpack().unwrap();
+        assert_eq!(result, 64);
     }
 }
