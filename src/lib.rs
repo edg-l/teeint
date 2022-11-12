@@ -14,7 +14,7 @@
 //! assert_eq!(buff[1], 0b0000_0001);
 //! ```
 //!
-//! Or using the trait [[PackTwInt]]:
+//! Or using the trait [PackTwInt]:
 //! ```
 //! use std::io::Cursor;
 //! use teeint::PackTwInt;
@@ -28,10 +28,8 @@
 //! assert_eq!(buff[1], 0b0000_0001);
 //! ```
 //!
-//! Thanks to [heinrich5991 libtw2 docs](https://github.com/heinrich5991/libtw2/blob/master/doc/int.md) for help.
-//!
 
-use std::io::{Result, Write};
+use std::io::{Read, Result, Write};
 
 /// Pack a i32 into a teeworlds variable integer.
 pub fn pack(dst: &mut impl Write, mut value: i32) -> Result<()> {
@@ -56,16 +54,43 @@ pub fn pack(dst: &mut impl Write, mut value: i32) -> Result<()> {
     while value != 0 {
         // We have more data, set BIT_EXTEND
         current_byte |= 0b1000_0000;
-        dst.write(&[current_byte])?;
+        dst.write_all(std::slice::from_ref(&current_byte))?;
         // Write the BITS[7]
         current_byte = value as u8 & 0b0111_1111;
         // Discard them.
         value >>= 7;
     }
 
-    dst.write(&[current_byte])?;
+    dst.write_all(std::slice::from_ref(&current_byte))?;
 
     Ok(())
+}
+
+/// Unpack a teeworlds variable int from the provided reader.
+pub fn unpack(src: &mut impl Read) -> Result<i32> {
+    // Adapted from https://github.com/ddnet/ddnet/blob/79df5893ff26fa75d67e46f99e58f75b739ac362/src/engine/shared/compression.cpp#L10
+    let mut result: i32;
+    let mut current_byte: u8 = 0;
+
+    src.read_exact(std::slice::from_mut(&mut current_byte))?;
+    let sign = (current_byte >> 6) & 1;
+    result = (current_byte & 0x3F) as i32;
+
+    const MASKS: [u8; 4] = [0x7F, 0x7F, 0x7F, 0x0F];
+    const SHIFTS: [u8; 4] = [6, 6 + 7, 6 + 7 + 7, 6 + 7 + 7 + 7];
+
+    for (mask, shift) in MASKS.into_iter().zip(SHIFTS.into_iter()) {
+        if (current_byte & 0x80) == 0 {
+            break;
+        }
+
+        src.read_exact(std::slice::from_mut(&mut current_byte))?;
+        result |= ((current_byte & mask) << shift) as i32;
+    }
+
+    result ^= -(sign as i32);
+
+    Ok(result)
 }
 
 /// Trait implemented by values that can be packed to a teeworlds variable int.
@@ -73,7 +98,7 @@ pub fn pack(dst: &mut impl Write, mut value: i32) -> Result<()> {
 /// Note that teeworlds only packs i32 values.
 ///
 /// This trait is more of a convenience to allow writing `0i32.pack(&mut buff)`
-pub trait PackTwInt: Copy {
+pub trait PackTwInt {
     /// Pack this value into a teeworlds variable int.
     fn pack(self, dst: &mut impl Write) -> Result<()>;
 }
@@ -89,6 +114,14 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
+
+    #[test]
+    pub fn unpack_0() {
+        let mut buff = Cursor::new([0; 1]);
+        assert!(pack(&mut buff, 0).is_ok());
+        buff.set_position(0);
+        assert_eq!(0, unpack(&mut buff).unwrap());
+    }
 
     #[test]
     pub fn pack_0() {
@@ -107,11 +140,27 @@ mod tests {
     }
 
     #[test]
+    pub fn unpack_1() {
+        let mut buff = Cursor::new([0; 1]);
+        assert!(pack(&mut buff, 1).is_ok());
+        buff.set_position(0);
+        assert_eq!(1, unpack(&mut buff).unwrap());
+    }
+
+    #[test]
     pub fn pack_2() {
         let mut buff = Cursor::new([0; 1]);
         assert!(pack(&mut buff, 2).is_ok());
         let buff = buff.into_inner();
         assert_eq!(buff[0], 0b0000_0010);
+    }
+
+    #[test]
+    pub fn unpack_2() {
+        let mut buff = Cursor::new([0; 1]);
+        assert!(pack(&mut buff, 2).is_ok());
+        buff.set_position(0);
+        assert_eq!(2, unpack(&mut buff).unwrap());
     }
 
     #[test]
@@ -123,6 +172,14 @@ mod tests {
     }
 
     #[test]
+    pub fn unpack_minus_2() {
+        let mut buff = Cursor::new([0; 1]);
+        assert!(pack(&mut buff, -2).is_ok());
+        buff.set_position(0);
+        assert_eq!(-2, unpack(&mut buff).unwrap());
+    }
+
+    #[test]
     pub fn pack_minus_1() {
         let mut buff = Cursor::new([0; 1]);
         assert!(pack(&mut buff, -1).is_ok());
@@ -131,12 +188,30 @@ mod tests {
     }
 
     #[test]
+    pub fn unpack_minus_1() {
+        let mut buff = Cursor::new([0; 1]);
+        assert!(pack(&mut buff, -1).is_ok());
+        buff.set_position(0);
+        assert_eq!(-1, unpack(&mut buff).unwrap());
+    }
+
+    #[test]
     pub fn pack_0_to_63() {
         for i in 0..64 {
             let mut buff = Cursor::new([0; 1]);
-            assert!(pack(&mut buff, i as i32).is_ok());
+            assert!(pack(&mut buff, i).is_ok());
             let buff = buff.into_inner();
-            assert_eq!(buff[0], i);
+            assert_eq!(buff[0] as i32, i);
+        }
+    }
+
+    #[test]
+    pub fn unpack_0_to_63() {
+        for i in 0..64 {
+            let mut buff = Cursor::new([0; 1]);
+            assert!(pack(&mut buff, i).is_ok());
+            buff.set_position(0);
+            assert_eq!(i, unpack(&mut buff).unwrap());
         }
     }
 
@@ -147,6 +222,14 @@ mod tests {
         let buff = buff.into_inner();
         assert_eq!(buff[0], 0b1000_0000);
         assert_eq!(buff[1], 0b0000_0001);
+    }
+
+    #[test]
+    pub fn unpack_64() {
+        let mut buff = Cursor::new([0; 2]);
+        assert!(pack(&mut buff, 64).is_ok());
+        buff.set_position(0);
+        assert_eq!(64, unpack(&mut buff).unwrap());
     }
 
     #[test]
