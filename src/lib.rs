@@ -1,6 +1,6 @@
 //! A teeworlds variable integer packer/unpacker.
 //!
-//! Packing:
+//! ## Packing
 //!
 //! ```
 //! use std::io::Cursor;
@@ -28,11 +28,41 @@
 //! assert_eq!(buff[1], 0b0000_0001);
 //! ```
 //!
+//! Or
+//! ```
+//! use teeint::PackTwInt;
+//!
+//! let mut buff = [0; 2];
+//! 64.pack(&mut buff.as_mut_slice()).unwrap();
+//! assert_eq!(buff[0], 0b1000_0000);
+//! assert_eq!(buff[1], 0b0000_0001);
+//! ```
+//!
+//! ## Unpacking
+//! ```
+//! use std::io::Cursor;
+//!
+//! let mut buff = Cursor::new([0b1000_0000, 0b0000_0001]);
+//! let data = teeint::unpack(&mut buff).unwrap();
+//! assert_eq!(data, 64);
+//! ```
+//!
+//! Or using the trait [UnPackTwInt]:
+//! ```
+//! use teeint::UnPackTwInt;
+//!
+//! let buff = [0b1000_0000, 0b0000_0001];
+//! let result = buff.as_slice().unpack().unwrap();
+//! assert_eq!(result, 64);
+//! ```
+
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 use std::io::{Read, Result, Write};
 
 /// Pack a i32 into a teeworlds variable integer.
-pub fn pack(dst: &mut impl Write, mut value: i32) -> Result<()> {
+pub fn pack<T: Write + ?Sized>(dst: &mut T, mut value: i32) -> Result<()> {
     let mut current_byte: u8 = 0;
 
     /*
@@ -67,7 +97,7 @@ pub fn pack(dst: &mut impl Write, mut value: i32) -> Result<()> {
 }
 
 /// Unpack a teeworlds variable int from the provided reader.
-pub fn unpack(src: &mut impl Read) -> Result<i32> {
+pub fn unpack<T: Read + ?Sized>(src: &mut T) -> Result<i32> {
     // Adapted from https://github.com/ddnet/ddnet/blob/79df5893ff26fa75d67e46f99e58f75b739ac362/src/engine/shared/compression.cpp#L10
     let mut result: i32;
     let mut current_byte: u8 = 0;
@@ -100,11 +130,11 @@ pub fn unpack(src: &mut impl Read) -> Result<i32> {
 /// This trait is more of a convenience to allow writing `0i32.pack(&mut buff)`
 pub trait PackTwInt {
     /// Pack this value into a teeworlds variable int.
-    fn pack(self, dst: &mut impl Write) -> Result<()>;
+    fn pack<T: Write + ?Sized>(self, dst: &mut T) -> Result<()>;
 }
 
 impl PackTwInt for i32 {
-    fn pack(self, dst: &mut impl Write) -> Result<()> {
+    fn pack<T: Write + ?Sized>(self, dst: &mut T) -> Result<()> {
         pack(dst, self)
     }
 }
@@ -112,12 +142,12 @@ impl PackTwInt for i32 {
 /// Trait implemented by buffers holding a teeworlds variable int.
 ///
 /// This trait is more of a convenience to allow writing `let data = buff.unpack()?;`
-pub trait UnpPackTwInt: Read {
+pub trait UnPackTwInt: Read {
     /// Unpack this reader holding a teeworlds variable int to a i32.
     fn unpack(&mut self) -> Result<i32>;
 }
 
-impl<T: Read> UnpPackTwInt for T {
+impl<T: Read + ?Sized> UnPackTwInt for T {
     fn unpack(&mut self) -> Result<i32> {
         unpack(self)
     }
@@ -256,9 +286,24 @@ mod tests {
     }
 
     #[test]
+    pub fn pack_64_trait_slice() {
+        let mut buff = [0; 2];
+        assert!(64.pack(&mut buff.as_mut_slice()).is_ok());
+        assert_eq!(buff[0], 0b1000_0000);
+        assert_eq!(buff[1], 0b0000_0001);
+    }
+
+    #[test]
     pub fn unpack_64_trait() {
         let mut buff = Cursor::new([0b1000_0000, 0b0000_0001]);
         let result = buff.unpack().unwrap();
+        assert_eq!(result, 64);
+    }
+
+    #[test]
+    pub fn unpack_64_trait_slice() {
+        let buff = [0b1000_0000, 0b0000_0001];
+        let result = buff.as_slice().unpack().unwrap();
         assert_eq!(result, 64);
     }
 }
