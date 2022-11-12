@@ -1,11 +1,14 @@
 # teeint
 
-A teeworlds variable integer packer/unpacker.
+
 [![Version](https://img.shields.io/crates/v/teeint)](https://crates.io/crates/teeint)
 [![Downloads](https://img.shields.io/crates/d/teeint)](https://crates.io/crates/teeint)
 [![License](https://img.shields.io/crates/l/teeint)](https://crates.io/crates/teeint)
 ![Rust](https://github.com/edg-l/teeint/workflows/Rust/badge.svg)
 [![Docs](https://docs.rs/teeint/badge.svg)](https://docs.rs/teeint)
+
+A teeworlds variable integer packer/unpacker.
+
 
 ### Packing
 
