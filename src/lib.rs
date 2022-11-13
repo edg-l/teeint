@@ -69,6 +69,9 @@
 
 use std::io::{Read, Result, Write};
 
+/// Max bytes packed in a variable int.
+pub const MAX_BYTES_PACKED: usize = 5;
+
 /// Pack a i32 into a teeworlds variable integer.
 pub fn pack<T: Write + ?Sized>(dst: &mut T, mut value: i32) -> Result<()> {
     let mut current_byte: u8 = 0;
@@ -86,7 +89,7 @@ pub fn pack<T: Write + ?Sized>(dst: &mut T, mut value: i32) -> Result<()> {
     }
 
     // First byte: Pack the remaining 6 bits
-    current_byte |= (value & 0b0011_1111) as u8;
+    current_byte |= value as u8 & 0b0011_1111;
     value >>= 6;
 
     while value != 0 {
@@ -114,8 +117,8 @@ pub fn unpack<T: Read + ?Sized>(src: &mut T) -> Result<i32> {
     let sign = (current_byte >> 6) & 1;
     result = (current_byte & 0x3F) as i32;
 
-    const MASKS: [u8; 4] = [0x7F, 0x7F, 0x7F, 0x0F];
-    const SHIFTS: [u8; 4] = [6, 6 + 7, 6 + 7 + 7, 6 + 7 + 7 + 7];
+    const MASKS: [i32; 4] = [0x7F, 0x7F, 0x7F, 0x0F];
+    const SHIFTS: [i32; 4] = [6, 6 + 7, 6 + 7 + 7, 6 + 7 + 7 + 7];
 
     for (mask, shift) in MASKS.into_iter().zip(SHIFTS.into_iter()) {
         if (current_byte & 0x80) == 0 {
@@ -123,7 +126,7 @@ pub fn unpack<T: Read + ?Sized>(src: &mut T) -> Result<i32> {
         }
 
         src.read_exact(std::slice::from_mut(&mut current_byte))?;
-        result |= ((current_byte & mask) << shift) as i32;
+        result |= (current_byte as i32 & mask) << shift;
     }
 
     result ^= -(sign as i32);
@@ -313,5 +316,32 @@ mod tests {
         let buff = [0b1000_0000, 0b0000_0001];
         let result = buff.as_slice().unpack().unwrap();
         assert_eq!(result, 64);
+    }
+
+    #[test]
+    pub fn roundtrip_256_trait() {
+        let mut buff = Cursor::new([0; MAX_BYTES_PACKED]);
+        256.pack(&mut buff).unwrap();
+        buff.set_position(0);
+
+        let result = buff.unpack().unwrap();
+        assert_eq!(256, result);
+    }
+
+    static DATA: [i32; 14] = [0, 1, -1, 32, 64, 256, -512, 12345, -123456, 1234567, 12345678, 123456789, 2147483647, (-2147483647 - 1)];
+    static SIZES: [u64; 14] = [1, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 5, 5];
+
+    #[test]
+    pub fn roundtrip_pack_unpack() {
+        for i in 0..DATA.len() {
+            let mut buff = Cursor::new([0; MAX_BYTES_PACKED]);
+            DATA[i].pack(&mut buff).unwrap();
+            assert_eq!(buff.position(), SIZES[i]);
+            buff.set_position(0);
+
+            let result = buff.unpack().unwrap();
+            assert_eq!(buff.position(), SIZES[i]);
+            assert_eq!(DATA[i], result);
+        }
     }
 }
