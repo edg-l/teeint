@@ -22,7 +22,7 @@
 //! assert_eq!(buff[1], 0b0000_0001);
 //! ```
 //!
-//! Or using the trait [PackTwInt]:
+//! Or using the trait [`PackTwInt`]:
 //! ```
 //! use std::io::Cursor;
 //! use teeint::PackTwInt;
@@ -55,7 +55,7 @@
 //! assert_eq!(data, 64);
 //! ```
 //!
-//! Or using the trait [UnPackTwInt]:
+//! Or using the trait [`UnPackTwInt`]:
 //! ```
 //! use teeint::UnPackTwInt;
 //!
@@ -66,6 +66,10 @@
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
+#![deny(warnings)]
+#![deny(clippy::nursery)]
+#![deny(clippy::pedantic)]
+#![deny(clippy::all)]
 
 use std::io::{Read, Result, Write};
 
@@ -73,6 +77,10 @@ use std::io::{Read, Result, Write};
 pub const MAX_BYTES_PACKED: usize = 5;
 
 /// Pack a i32 into a teeworlds variable integer.
+///
+/// # Errors
+/// Returns `Err` if there is an error writing to `dst`.
+#[inline]
 pub fn pack<T: Write + ?Sized>(dst: &mut T, mut value: i32) -> Result<()> {
     let mut current_byte: u8 = 0;
 
@@ -89,7 +97,7 @@ pub fn pack<T: Write + ?Sized>(dst: &mut T, mut value: i32) -> Result<()> {
     }
 
     // First byte: Pack the remaining 6 bits
-    current_byte |= value as u8 & 0b0011_1111;
+    current_byte |= u8::try_from(value & 0b0011_1111).expect("should always be inside the range");
     value >>= 6;
 
     while value != 0 {
@@ -97,7 +105,8 @@ pub fn pack<T: Write + ?Sized>(dst: &mut T, mut value: i32) -> Result<()> {
         current_byte |= 0b1000_0000;
         dst.write_all(std::slice::from_ref(&current_byte))?;
         // Write the BITS[7]
-        current_byte = value as u8 & 0b0111_1111;
+        current_byte =
+            u8::try_from(value & 0b0111_1111).expect("should always be inside the range");
         // Discard them.
         value >>= 7;
     }
@@ -108,17 +117,21 @@ pub fn pack<T: Write + ?Sized>(dst: &mut T, mut value: i32) -> Result<()> {
 }
 
 /// Unpack a teeworlds variable int from the provided reader.
+///
+/// # Errors
+/// Returns `Err` if there is an error reading from `src`
+#[inline]
 pub fn unpack<T: Read + ?Sized>(src: &mut T) -> Result<i32> {
+    const MASKS: [i32; 4] = [0x7F, 0x7F, 0x7F, 0x0F];
+    const SHIFTS: [i32; 4] = [6, 6 + 7, 6 + 7 + 7, 6 + 7 + 7 + 7];
+
     // Adapted from https://github.com/ddnet/ddnet/blob/79df5893ff26fa75d67e46f99e58f75b739ac362/src/engine/shared/compression.cpp#L10
     let mut result: i32;
     let mut current_byte: u8 = 0;
 
     src.read_exact(std::slice::from_mut(&mut current_byte))?;
     let sign = (current_byte >> 6) & 1;
-    result = (current_byte & 0x3F) as i32;
-
-    const MASKS: [i32; 4] = [0x7F, 0x7F, 0x7F, 0x0F];
-    const SHIFTS: [i32; 4] = [6, 6 + 7, 6 + 7 + 7, 6 + 7 + 7 + 7];
+    result = i32::from(current_byte & 0x3F);
 
     for (mask, shift) in MASKS.into_iter().zip(SHIFTS.into_iter()) {
         if (current_byte & 0x80) == 0 {
@@ -126,10 +139,10 @@ pub fn unpack<T: Read + ?Sized>(src: &mut T) -> Result<i32> {
         }
 
         src.read_exact(std::slice::from_mut(&mut current_byte))?;
-        result |= (current_byte as i32 & mask) << shift;
+        result |= (i32::from(current_byte) & mask) << shift;
     }
 
-    result ^= -(sign as i32);
+    result ^= -i32::from(sign);
 
     Ok(result)
 }
@@ -141,10 +154,14 @@ pub fn unpack<T: Read + ?Sized>(src: &mut T) -> Result<i32> {
 /// This trait is more of a convenience to allow writing `0i32.pack(&mut buff)`
 pub trait PackTwInt {
     /// Pack this value into a teeworlds variable int.
+    ///
+    /// # Errors
+    /// Returns `Err` if there is an error writing to `dst`.
     fn pack<T: Write + ?Sized>(self, dst: &mut T) -> Result<()>;
 }
 
 impl PackTwInt for i32 {
+    #[inline]
     fn pack<T: Write + ?Sized>(self, dst: &mut T) -> Result<()> {
         pack(dst, self)
     }
@@ -155,10 +172,13 @@ impl PackTwInt for i32 {
 /// This trait is more of a convenience to allow writing `let data = buff.unpack()?;`
 pub trait UnPackTwInt: Read {
     /// Unpack this reader holding a teeworlds variable int to a i32.
+    /// # Errors
+    /// Returns `Err` if there is an error reading from `Self`
     fn unpack(&mut self) -> Result<i32>;
 }
 
 impl<T: Read + ?Sized> UnPackTwInt for T {
+    #[inline]
     fn unpack(&mut self) -> Result<i32> {
         unpack(self)
     }
@@ -256,7 +276,7 @@ mod tests {
             let mut buff = Cursor::new([0; 1]);
             assert!(pack(&mut buff, i).is_ok());
             let buff = buff.into_inner();
-            assert_eq!(buff[0] as i32, i);
+            assert_eq!(i32::from(buff[0]), i);
         }
     }
 
@@ -328,7 +348,22 @@ mod tests {
         assert_eq!(256, result);
     }
 
-    static DATA: [i32; 14] = [0, 1, -1, 32, 64, 256, -512, 12345, -123456, 1234567, 12345678, 123456789, 2147483647, (-2147483647 - 1)];
+    static DATA: [i32; 14] = [
+        0,
+        1,
+        -1,
+        32,
+        64,
+        256,
+        -512,
+        12345,
+        -123_456,
+        1_234_567,
+        12_345_678,
+        123_456_789,
+        2_147_483_647,
+        (-2_147_483_647 - 1),
+    ];
     static SIZES: [u64; 14] = [1, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 5, 5];
 
     #[test]
